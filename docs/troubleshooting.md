@@ -64,7 +64,7 @@ $ vboxmanage hostonlyif ipconfig vboxnet0 --ip 192.168.65.1
 
 **Problem**: One or more Vagrant plugins fail to install.
 
-**Solution**: Upgrade Ruby to >= 2.2. See [Appendix: Install Ruby](#install-ruby) for instructions.
+**Solution**: Upgrade Ruby to >= 2.2. See [Install Ruby](/docs/install-ruby.md) for instructions.
 
 
 ## Package Install Failure
@@ -79,3 +79,31 @@ service dcos-cosmos restart
 ```
 
 This happens because Cosmos doesn't always pick up DNS changes that happen during bootstrap. Known bug in 1.6.1. Should be fixed in 1.7.0.
+
+## Too Many Open Files
+
+**Problem**: `vagrant up` errors with `Too many open files - getcwd (Errno::EMFILE)`
+
+**Solution**: Increase the file limit on the host
+
+```
+ulimit -n 1024
+```
+
+## Unable to login to your DC/OS cluster
+
+**Problem**: Trying to login to http://m1.dcos/ fails with the message `Unable to login to your DC/OS cluster. Clusters must be connected to the internet.`
+
+**Solution**: Ensure that you have installed the latest version of VirtualBox (5.0.20+).
+
+## Plugin Install Fails on Vagrant 1.8.3
+
+**Problem**: The following error is returned when attempting to `vagrant plugin install vagrant-hostmanager`
+
+```
+...
+/usr/local/lib/ruby/site_ruby/2.1/rubygems/specification.rb:945:in `all=': undefined method `group_by' for nil:NilClass (NoMethodError)
+...
+```
+
+**Solution**: Upgrade Vagrant to 1.8.4+ to fix an incompatibility with Ruby 2.3

@@ -23,7 +23,7 @@ class UserConfig
     c = new
     c.box                  = ENV.fetch('DCOS_BOX', 'mesosphere/dcos-centos-virtualbox')
     c.box_url              = ENV.fetch('DCOS_BOX_URL', 'https://downloads.dcos.io/dcos-vagrant/metadata.json')
-    c.box_version          = ENV.fetch('DCOS_BOX_VERSION', '~> 0.6.0')
+    c.box_version          = ENV.fetch('DCOS_BOX_VERSION', '~> 0.7.0')
     c.machine_config_path  = ENV.fetch('DCOS_MACHINE_CONFIG_PATH', 'VagrantConfig.yaml')
     c.config_path          = ENV.fetch('DCOS_CONFIG_PATH', 'etc/config.yaml')
     c.generate_config_path = ENV.fetch('DCOS_GENERATE_CONFIG_PATH', 'dcos_generate_config.sh')
@@ -75,13 +75,17 @@ class UserConfig
   end
 
   # create environment for provisioning scripts
-  def provision_env
-    {
+  def provision_env(machine_type)
+    env = {
       'DCOS_CONFIG_PATH' => path_to_url(@config_path),
       'DCOS_GENERATE_CONFIG_PATH' => path_to_url(@generate_config_path),
       'DCOS_JAVA_ENABLED' => @java_enabled ? 'true' : 'false',
       'DCOS_PRIVATE_REGISTRY' => @private_registry ? 'true' : 'false'
     }
+    if machine_type['memory-reserved']
+      env['DCOS_TASK_MEMORY'] = machine_type['memory'] - machine_type['memory-reserved']
+    end
+    env
   end
 
   protected
@@ -142,11 +146,8 @@ end
 
 def raise_errors(errors)
   STDERR.puts 'Errors:'
-  errors.each do |category, error_list|
-    STDERR.puts "  #{category}:"
-    error_list.each do |error|
-      STDERR.puts "    #{error}"
-    end
+  errors.each do |error|
+    STDERR.puts "  #{error}"
   end
   exit 2
 end
@@ -156,17 +157,30 @@ def provision_script_path(type)
   "./provision/bin/#{type}.sh"
 end
 
+## One Time Setup
+##############################################
+
 Vagrant.require_version '>= 1.8.1'
+
+validate_plugins || exit(1)
+
+# parse and validate environment
+user_config = UserConfig.from_env
+errors = user_config.validate
+raise_errors(errors) unless errors.empty?
+
+# parse and validate machine config
+machine_types = YAML.load_file(Pathname.new(user_config.machine_config_path).realpath)
+validate_machine_types(machine_types)
+
+# configure vbox host-only network
+system(provision_script_path('vbox-network'))
+
 
 ## VM Creation & Provisioning
 ##############################################
 
 Vagrant.configure(2) do |config|
-
-  # configure vbox networking
-  system(provision_script_path('vbox-network'))
-
-  validate_plugins || exit(1)
 
   # configure vagrant-hostmanager plugin
   config.hostmanager.enabled = true
@@ -178,14 +192,6 @@ Vagrant.configure(2) do |config|
     # enable auto update guest additions
     config.vbguest.auto_update = true
   end
-
-  user_config = UserConfig.from_env
-
-  errors = user_config.validate
-  raise_errors(errors) unless errors.empty?
-
-  machine_types = YAML.load_file(Pathname.new(user_config.machine_config_path).realpath)
-  validate_machine_types(machine_types)
 
   machine_types.each do |name, machine_type|
     config.vm.define name do |machine|
@@ -213,43 +219,64 @@ Vagrant.configure(2) do |config|
         override.vm.network :private_network, ip: machine_type['ip']
       end
 
+      # Hack to remove loopback host alias that conflicts with vagrant-hostmanager
+      # https://dcosjira.atlassian.net/browse/VAGRANT-15
+      machine.vm.provision :shell, inline: "sed -i'' '/^127.0.0.1\\t#{machine.vm.hostname}\\t#{name}$/d' /etc/hosts"
+
       # provision a shared SSH key (required by DC/OS SSH installer)
-      machine.vm.provision(
-        :dcos_ssh,
-        name: 'Shared SSH Key',
-        preserve_order: true
-      )
+      machine.vm.provision :dcos_ssh, name: 'Shared SSH Key'
 
-      machine.vm.provision(
-        :shell,
-        name: 'Certificate Authorities',
-        path: provision_script_path('ca-certificates')
-      )
-
-      if user_config.private_registry
-        machine.vm.provision(
-          :shell,
-          name: 'Private Docker Registry',
-          path: provision_script_path('insecure-registry')
-        )
+      machine.vm.provision :shell do |vm|
+        vm.name = 'Certificate Authorities'
+        vm.path = provision_script_path('ca-certificates')
       end
 
-      # only provision the boot machine
-      if machine_type['type'] == 'boot'
-        machine.vm.provision(
-          :shell,
-          name: "DC/OS #{machine_type['type'].capitalize}",
-          path: provision_script_path("type-#{machine_type['type']}"),
-          env: user_config.provision_env
-        )
+      machine.vm.provision :shell do |vm|
+	    vm.name = 'Install Probe'
+        vm.path = provision_script_path('install-probe')
+      end
 
-        machine.vm.provision(
-          :dcos_install,
-          install_method: user_config.install_method,
-          machine_types: machine_types,
-          config_template_path: user_config.config_path,
-          preserve_order: true
-        )
+      machine.vm.provision :shell do |vm|
+        vm.name = 'Install jq'
+        vm.path = provision_script_path('install-jq')
+      end
+
+      machine.vm.provision :shell do |vm|
+        vm.name = 'Install DC/OS Postflight'
+        vm.path = provision_script_path('install-postflight')
+      end
+
+      case machine_type['type']
+      when 'agent-private', 'agent-public'
+        machine.vm.provision :shell do |vm|
+          vm.name = 'Install Mesos Memory Modifier'
+          vm.path = provision_script_path('install-mesos-memory')
+        end
+      end
+
+      if user_config.private_registry
+        machine.vm.provision :shell do |vm|
+          vm.name = 'Start Private Docker Registry'
+          vm.path = provision_script_path('insecure-registry')
+        end
+      end
+
+      script_path = provision_script_path("type-#{machine_type['type']}")
+      if File.exist?(script_path)
+        machine.vm.provision :shell do |vm|
+          vm.name = "DC/OS #{machine_type['type'].capitalize}"
+          vm.path = script_path
+          vm.env = user_config.provision_env(machine_type)
+        end
+      end
+
+      if machine_type['type'] == 'boot'
+        # install DC/OS after boot machine is provisioned
+        machine.vm.provision :dcos_install do |dcos|
+          dcos.install_method = user_config.install_method
+          dcos.machine_types = machine_types
+          dcos.config_template_path = user_config.config_path
+        end
       end
     end
   end
