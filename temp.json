@@ -1,0 +1,23 @@
+{
+  "id": "/multi-test7",
+  "groups": [ {
+    "id": "/multi-test7/persistence",
+    "apps": [ {
+      "id": "/multi-test7/persistence/mongo",
+      "cmd": "while [ true ] ; do echo 'Fake MongoDB server' ; sleep 5 ; done",
+      "cpus": 0.1,
+      "mem": 64.0,
+      "instances": 1
+    }]
+  },{
+    "id": "/multi-test7/persistence2",
+    "apps": [ {
+      "id": "/multi-test7/persistence2/mongo",
+      "dependencies": ["/multi-test7/persistence/mongo"],
+      "cmd": "while [ true ] ; do echo 'Fake MongoDB server' ; sleep 5 ; done",
+      "cpus": 0.1,
+      "mem": 64.0,
+      "instances": 1
+    }]
+  } ]
+}

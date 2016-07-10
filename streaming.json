@@ -1,0 +1,40 @@
+{
+  "id": "/pravega",
+  "groups": [ {
+      "id": "/pravega/tier1",
+      "dependencies": ["/pravega/distributedlog"],
+      "apps": [ { 
+           "id": "/pravega/tier1/storagenode",
+           "cmd": "sudo docker run --net=host -p 12345:12345 arvindkandhare/streaming",
+           "cpus": 1,
+           "mem": 128,
+           "disk": 0,
+           "instances": 1
+         }
+       ]
+    },{
+      "id": "/pravega/distributedlog",
+      "apps": [
+         { "id": "/pravega/distributedlog/localdl",
+           "cmd": null,
+           "cpus": 1,
+           "mem": 128,
+           "disk": 0,
+           "instances": 1,
+           "container": {
+                  "type": "DOCKER",
+                  "volumes": [],
+                  "docker": {
+                         "image": "arvindkandhare/localdl",
+                         "network": "HOST",
+                         "privileged": false,
+                         "parameters": [],
+                         "forcePullImage": false
+                   }
+            },
+            "portDefinitions": []
+	 }
+      ]
+    }
+  ]
+}
