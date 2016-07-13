@@ -1,1 +1,1 @@
-dcos marathon group add streaming.json
+dcos marathon group add pravega.json
