@@ -4,7 +4,7 @@
       "id": "/pravega/tier1",
       "dependencies": ["/pravega/distributedlog"],
       "apps": [ { 
-           "id": "/pravega/tier1/storagenode",
+           "id": "/pravega/tier1/streamingnode",
            "cmd": "sudo docker run --net=host -p 12345:12345 arvindkandhare/streaming",
            "cpus": 1,
            "mem": 128,
